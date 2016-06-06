@@ -1,13 +1,13 @@
 package porter
 
 import (
-	"crypto/rand"
 	"fmt"
 	"github.com/Sirupsen/logrus"
 	"github.com/index0h/go-porter/message"
 	"github.com/streadway/amqp"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,6 +18,7 @@ type entry struct {
 
 type Porter struct {
 	lock      sync.RWMutex
+	counter   uint32
 	toQueue   chan<- amqp.Publishing
 	fromQueue <-chan amqp.Delivery
 	ttl       time.Duration
@@ -42,49 +43,32 @@ func NewPorter(
 	}
 }
 
-func (p *Porter) correlationID() (string, error) {
-	result := [16]byte{}
-
-	if _, err := rand.Read(result[:]); err != nil {
-		return "", err
-	}
-
-	result[8] = (result[8] | 0x80) & 0xBF
-	result[6] = (result[6] | 0x40) & 0x4F
-
-	return fmt.Sprintf("%X", result), nil
+func (p *Porter) correlationID() string {
+	return fmt.Sprintf("%d", atomic.AddUint32(&p.counter, 1))
 }
 
 func (p *Porter) Start() {
 	for delivery := range p.fromQueue {
-		p.handleDelivery(delivery)
+		go p.handleDelivery(delivery)
 	}
 }
 
 func (p *Porter) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	correlationID := p.correlationID()
+
 	logger := p.logger.WithFields(
 		logrus.Fields{
-			"RequestURI": request.RequestURI,
-			"Method":     request.Method,
-			"RemoteAddr": request.RemoteAddr,
+			"RequestURI":    request.RequestURI,
+			"Method":        request.Method,
+			"RemoteAddr":    request.RemoteAddr,
+			"CorrelationId": correlationID,
 		},
 	)
 
 	var (
-		correlationID string
-		err           error
-		body          []byte
+		err  error
+		body []byte
 	)
-
-	if correlationID, err = p.correlationID(); err != nil {
-		http.Error(responseWriter, "", 500)
-
-		logger.Errorf("Could not create correlation id: %s", err)
-
-		return
-	}
-
-	logger = logger.WithField("CorrelationId", correlationID)
 
 	if body, err = message.NewRequestFromHTTP(*request).Bytes(); err != nil {
 		http.Error(responseWriter, "", 500)

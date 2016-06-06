@@ -69,16 +69,6 @@ func main() {
 		logger.Info("RabbitMQ consume queue declaration: ok")
 	}
 
-	err = amqpChannel.Qos(
-		1,     // prefetch count
-		0,     // prefetch size
-		false, // global
-	)
-
-	if err != nil {
-		logger.Panicf("Failed to set QoS: %s", err)
-	}
-
 	var delivery <-chan amqp.Delivery
 
 	delivery, err = amqpChannel.Consume(
@@ -96,8 +86,6 @@ func main() {
 	} else {
 		logger.Info("RabbitMQ register consumer: ok")
 	}
-
-	logger.Warn()
 
 	publish := make(chan amqp.Publishing)
 

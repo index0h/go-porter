@@ -38,6 +38,6 @@ func NewRequestFromAMQPDelivery(delivery amqp.Delivery) (*Request, error) {
 	return request, nil
 }
 
-func (this *Request) Bytes() ([]byte, error) {
-	return json.Marshal(this)
+func (r *Request) Bytes() ([]byte, error) {
+	return json.Marshal(r)
 }

@@ -42,7 +42,7 @@ func NewPorter(
 	}
 }
 
-func (this *Porter) correlationId() (string, error) {
+func (p *Porter) correlationID() (string, error) {
 	result := [16]byte{}
 
 	if _, err := rand.Read(result[:]); err != nil {
@@ -55,14 +55,14 @@ func (this *Porter) correlationId() (string, error) {
 	return fmt.Sprintf("%X", result), nil
 }
 
-func (this *Porter) Start() {
-	for delivery := range this.fromQueue {
-		this.handleDelivery(delivery)
+func (p *Porter) Start() {
+	for delivery := range p.fromQueue {
+		p.handleDelivery(delivery)
 	}
 }
 
-func (this *Porter) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
-	logger := this.logger.WithFields(
+func (p *Porter) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	logger := p.logger.WithFields(
 		logrus.Fields{
 			"RequestURI": request.RequestURI,
 			"Method":     request.Method,
@@ -71,89 +71,87 @@ func (this *Porter) ServeHTTP(responseWriter http.ResponseWriter, request *http.
 	)
 
 	var (
-		correlationId string
+		correlationID string
 		err           error
 		body          []byte
 	)
 
-	if correlationId, err = this.correlationId(); err != nil {
+	if correlationID, err = p.correlationID(); err != nil {
 		http.Error(responseWriter, "", 500)
 
-		logger.Errorf("Could not create correlation id: ", err)
+		logger.Errorf("Could not create correlation id: %s", err)
 
 		return
 	}
 
-	logger = logger.WithField("CorrelationId", correlationId)
+	logger = logger.WithField("CorrelationId", correlationID)
 
 	if body, err = message.NewRequestFromHTTP(*request).Bytes(); err != nil {
 		http.Error(responseWriter, "", 500)
 
-		logger.Errorf("Could not serialize request: ", err)
+		logger.Errorf("Could not serialize request: %s", err)
 	}
 
 	closeRequest := make(chan bool)
 
-	this.lock.Lock()
+	p.lock.Lock()
 
-	this.entries[correlationId] = entry{
+	p.entries[correlationID] = entry{
 		responseWriter: responseWriter,
 		closeRequest:   closeRequest,
 	}
 
-	this.lock.Unlock()
+	p.lock.Unlock()
 
 	message := amqp.Publishing{
 		ContentType:   "application/json",
-		CorrelationId: correlationId,
+		CorrelationId: correlationID,
 		Body:          body,
 	}
 
 	go func() {
-		this.toQueue <- message
+		p.toQueue <- message
 
 		logger.Info("Request sent to AMQP")
 	}()
 
 	select {
 	case <-closeRequest:
-	case <-time.After(this.ttl):
-		this.lock.Lock()
+	case <-time.After(p.ttl):
+		p.lock.Lock()
 
-		if entry, entryFound := this.entries[correlationId]; entryFound {
-			delete(this.entries, correlationId)
+		if entry, entryFound := p.entries[correlationID]; entryFound {
+			delete(p.entries, correlationID)
 
 			http.Error(entry.responseWriter, "", 500)
 
 			logger.Errorf("Request TTL expied")
 		}
 
-		this.lock.Unlock()
+		p.lock.Unlock()
 	}
 
 	close(closeRequest)
 }
 
-func (this *Porter) handleDelivery(delivery amqp.Delivery) {
-	delivery.Ack(true)
+func (p *Porter) handleDelivery(delivery amqp.Delivery) {
+	logger := p.logger.WithField("CorrelationId", delivery.CorrelationId)
 
-	logger := this.logger.WithField("CorrelationId", delivery.CorrelationId)
+	p.lock.Lock()
 
-	this.lock.Lock()
-
-	entry, entryFound := this.entries[delivery.CorrelationId]
+	entry, entryFound := p.entries[delivery.CorrelationId]
 
 	if !entryFound {
 		logger.Warning("Entry not found by CorrelationId")
 
-		this.lock.Unlock()
+		p.lock.Unlock()
 
 		return
 	}
 
-	delete(this.entries, delivery.CorrelationId)
+	delete(p.entries, delivery.CorrelationId)
 
-	this.lock.Unlock()
+	p.lock.Unlock()
 
 	defer func() {
 		entry.closeRequest <- true

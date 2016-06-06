@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/index0h/go-porter/porter"
 	"flag"
 	"github.com/Sirupsen/logrus"
+	"github.com/index0h/go-porter/porter"
 	"github.com/streadway/amqp"
 	"net/http"
 	"strconv"
@@ -36,6 +36,8 @@ func main() {
 
 	if amqpConnection, err = amqp.Dial(*amqpDsn); err != nil {
 		logger.Panicf("Failed to connect to RabbitMQ: %s", err)
+	} else {
+		logger.Info("RabbitMQ connection: ok")
 	}
 
 	defer amqpConnection.Close()
@@ -44,6 +46,8 @@ func main() {
 
 	if amqpChannel, err = amqpConnection.Channel(); err != nil {
 		logger.Panicf("Failed to open a channel: %s", err)
+	} else {
+		logger.Info("RabbitMQ open channel: ok")
 	}
 
 	defer amqpChannel.Close()
@@ -61,6 +65,8 @@ func main() {
 
 	if err != nil {
 		logger.Panicf("Failed to declare a consume queue: %s", err)
+	} else {
+		logger.Info("RabbitMQ consume queue declaration: ok")
 	}
 
 	err = amqpChannel.Qos(
@@ -78,7 +84,7 @@ func main() {
 	delivery, err = amqpChannel.Consume(
 		consumeQueue.Name, // queue
 		"",                // consumer
-		false,             // auto-ack
+		true,              // auto-ack
 		true,              // exclusive
 		false,             // no-local
 		false,             // no-wait
@@ -87,6 +93,8 @@ func main() {
 
 	if err != nil {
 		logger.Panicf("Failed to register a consumer: %s", err)
+	} else {
+		logger.Info("RabbitMQ register consumer: ok")
 	}
 
 	logger.Warn()

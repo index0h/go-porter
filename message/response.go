@@ -21,6 +21,6 @@ func NewResponseFromAMQPDelivery(delivery amqp.Delivery) (*Response, error) {
 	return response, nil
 }
 
-func (this *Response) Bytes() ([]byte, error) {
-	return json.Marshal(this)
+func (r *Response) Bytes() ([]byte, error) {
+	return json.Marshal(r)
 }
